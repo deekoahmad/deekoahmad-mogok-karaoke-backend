@@ -1,37 +1,78 @@
 import os
-from flask import Flask, request
-import telegram
+import requests
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8957688388:AAENJ6-hXVIoWI-7dfDdlZIHLwLy7RMFfKE")
-GROUP_ID = os.environ.get("TELEGRAM_GROUP_ID", "@deeko_karaoki")
-
-bot = telegram.Bot(token=BOT_TOKEN)
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHAT_ID = (
+    os.environ.get("TELEGRAM_TARGET_CHAT_ID")
+    or os.environ.get("TELEGRAM_GROUP_ID")
+)
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Mogok Karaoke Forward Bot is running!"
+    return jsonify({"status": "ok", "service": "Mogok Karaoke Bot"})
 
-@app.route("/webhook", methods=["POST"])
-def telegram_webhook():
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
+
+@app.route("/submit-link", methods=["POST"])
+def submit_link():
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+
+    if not url.startswith(("https://www.youtube.com/",
+                           "https://youtube.com/",
+                           "https://youtu.be/")):
+        return jsonify({
+            "ok": False,
+            "error": "Please provide a valid HTTPS YouTube link"
+        }), 400
+
+    if not BOT_TOKEN or not CHAT_ID:
+        return jsonify({
+            "ok": False,
+            "error": "Telegram environment variables are missing"
+        }), 500
+
+    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
     try:
-        data = request.get_json(silent=True) or {}
-        message = data.get("message") or data.get("edited_message")
-        
-        if message:
-            text = message.get("text", "") or message.get("caption", "")
-            
-            if "youtube.com" in text or "youtu.be" in text:
-                bot.send_message(
-                    chat_id=GROUP_ID, 
-                    text=f"🎵 New Link from App:\n{text}"
-                )
+        response = requests.post(
+            api_url,
+            json={
+                "chat_id": CHAT_ID,
+                "text": f"🎵 New link from Mogok Karaoke App:\n{url}"
+            },
+            timeout=20
+        )
 
-    except Exception as e:
-        print(f"Error: {e}")
+        result = response.json()
 
-    return "OK", 200
+        if response.ok and result.get("ok"):
+            return jsonify({
+                "ok": True,
+                "message": "Link sent to Telegram"
+            })
+
+        print("Telegram API error:", result)
+        return jsonify({
+            "ok": False,
+            "error": "Telegram rejected the message"
+        }), 502
+
+    except requests.RequestException as exc:
+        print("Telegram connection error:", str(exc))
+        return jsonify({
+            "ok": False,
+            "error": "Could not connect to Telegram"
+        }), 502
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
