@@ -71,6 +71,44 @@ def submit_link():
         }), 502
 
 
+@app.route("/telegram-test", methods=["POST"])
+def telegram_test():
+    key = os.environ.get("TELEGRAM_TEST_KEY")
+    supplied_key = request.headers.get("X-Test-Key")
+
+    if not key or supplied_key != key:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    if not BOT_TOKEN or not CHAT_ID:
+        return jsonify({
+            "ok": False,
+            "error": "Telegram settings missing"
+        }), 500
+
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": CHAT_ID,
+                "text": "✅ Mogok Karaoke Telegram connection test"
+            },
+            timeout=20
+        )
+        result = response.json()
+
+        if response.ok and result.get("ok"):
+            return jsonify({"ok": True, "message": "Telegram message sent"})
+
+        print("Telegram API error:", result)
+        return jsonify({
+            "ok": False,
+            "error": result.get("description", "Telegram API error")
+        }), 502
+
+    except requests.RequestException as exc:
+        print("Telegram connection error:", str(exc))
+        return jsonify({"ok": False, "error": "Connection failed"}), 502
+        
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
