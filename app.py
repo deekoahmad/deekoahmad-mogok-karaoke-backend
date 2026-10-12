@@ -17,17 +17,17 @@ def download_video():
         return "Error: YouTube URL is missing", 400
 
     def generate():
-        # yt-dlp ဖြင့် ဗီဒီယိုအပြည့်အစုံကို mp4 format ဖြင့် stdout သို့ တိုက်ရိုက်ထုတ်ပေးခြင်း
+        # yt-dlp ဖြင့် ဗီဒီယိုအပြည့်အစုံကို အကောင်းဆုံး format ဖြင့် stdout သို့ တိုက်ရိုက်ထုတ်ပေးခြင်း
         cmd = [
             'yt-dlp',
-            '-f', 'best[ext=mp4]/best',
+            '-f', 'best',
             '-o', '-',
             youtube_url
         ]
         
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
         while True:
-            data = process.stdout.read(8192)
+            data = process.stdout.read(65536)
             if not data:
                 break
             yield data
