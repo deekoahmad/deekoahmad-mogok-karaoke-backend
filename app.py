@@ -1,4 +1,7 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, send_file
+import subprocess
+import os
+import uuid
 import requests
 
 app = Flask(__name__)
@@ -18,43 +21,50 @@ def download_video():
     if not youtube_url:
         return "Error: YouTube URL is missing", 400
 
+    temp_filename = f"{uuid.uuid4()}.mp4"
+    
     try:
-        # Cobalt API သုံးပြီး YouTube ဗီဒီယိုလင့်ခ်ကို တိုက်ရိုက် MP4 Link အဖြစ်ပြောင်းယူခြင်း
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "url": youtube_url,
-            "vQuality": "720"
-        }
+        # yt-dlp ဖြင့် Android Client ပုံစံဖြင့် ဗီဒီယိုကို ဆွဲထုတ်ခြင်း
+        cmd = [
+            'yt-dlp',
+            '--no-check-certificates',
+            '--extractor-args', 'youtube:player_client=android',
+            '-f', 'best',
+            '-o', temp_filename,
+            youtube_url
+        ]
         
-        api_response = requests.post("https://co.wuk.sh/api/json", json=payload, headers=headers, timeout=20)
-        res_data = api_response.json()
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        
+        if result.returncode != 0 or not os.path.exists(temp_filename) or os.path.getsize(temp_filename) == 0:
+            return f"Download Failed: {result.stderr}", 500
 
-        if "url" in res_data:
-            video_download_url = res_data["url"]
-            
-            # Telegram Group သို့ လင့်ခ်ပို့ပေးခြင်း (Backup)
-            try:
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"📥 Downloaded: {file_name}\n{youtube_url}"},
-                    timeout=10
-                )
-            except:
-                pass
+        # Telegram Group သို့ ဗီဒီယိုဖိုင် ပို့ပေးခြင်း (Backup အနေဖြင့်)
+        try:
+            with open(temp_filename, 'rb') as video_file:
+                files = {'video': video_file}
+                data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': f"📥 Downloaded: {file_name}"}
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo", data=data, files=files, timeout=30)
+        except:
+            pass
 
-            # App ဘက်သို့ တိုက်ရိုက် Download ဆွဲရန် Video URL ကို JSON ဖြင့် ပြန်ပေးမည်
-            return jsonify({
-                "status": "success",
-                "download_url": video_download_url,
-                "file_name": file_name + ".mp4"
-            })
-        else:
-            return f"API Error: {res_data}", 500
+        safe_filename = f"{file_name}.mp4"
+
+        # App ဘက်သို့ ဗီဒီယိုဖိုင်ကို တိုက်ရိုက်ပေးပို့ခြင်း
+        response = send_file(
+            temp_filename,
+            as_attachment=True,
+            download_name=safe_filename,
+            mimetype='video/mp4'
+        )
+        return response
 
     except Exception as e:
+        if os.path.exists(temp_filename):
+            try:
+                os.remove(temp_filename)
+            except:
+                pass
         return str(e), 500
 
 if __name__ == '__main__':
