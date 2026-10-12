@@ -16,24 +16,22 @@ def download_video():
     if not youtube_url:
         return "Error: YouTube URL is missing", 400
 
-    # ဆာဗာမှာ ဖိုင်အမြဲမသိမ်းဘဲ yt-dlp ဖြင့် တိုက်ရိုက် Stream လုပ်ပေးမည့် Command
     def generate():
-        # yt-dlp ကိုသုံး၍ best video+audio ကို mp4 အဖြစ် stdout သို့ တိုက်ရိုက်ထုတ်ပေးခြင်း
+        # yt-dlp ဖြင့် ဗီဒီယိုအပြည့်အစုံကို mp4 format ဖြင့် stdout သို့ တိုက်ရိုက်ထုတ်ပေးခြင်း
         cmd = [
             'yt-dlp',
-            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=mp4]/best[ext=mp4]/best',
+            '-f', 'best[ext=mp4]/best',
             '-o', '-',
             youtube_url
         ]
         
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         while True:
-            data = process.stdout.read(4096)
+            data = process.stdout.read(8192)
             if not data:
                 break
             yield data
 
-    # User ရဲ့ ဖုန်းထဲသို့ ဖိုင်နာမည်မှန်ကန်စွာဖြင့် .mp4 အဖြစ် တိုက်ရိုက်ပေးပို့ခြင်း
     safe_filename = f"{file_name}.mp4".encode('utf-8').decode('latin-1')
     return Response(
         generate(),
