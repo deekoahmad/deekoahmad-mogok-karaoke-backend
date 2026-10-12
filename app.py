@@ -43,7 +43,27 @@ def api(method, **kwargs):
 @app.get("/")
 @app.get("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "message": "Mogok Karaoke Backend is running!"})
+
+# Android App မှ YouTube လင့်ခ်များကို လက်ခံရန် Endpoint 
+@app.post("/webhook")
+def app_webhook():
+    try:
+        data = request.get_json(silent=True) or {}
+        # Android App မှလာသော ပုံစံ သို့မဟုတ် Telegram မှလာသော ပုံစံ နှစ်မျိုးစလုံးကို လက်ခံနိုင်ရန်
+        message = data.get("message") or data.get("edited_message")
+        if message:
+            text = message.get("text", "") or message.get("caption", "")
+            
+            # YouTube လင့်ခ်ပါလာပါက Telegram Group ထဲသို့ Bot မှတဆင့် ပို့ပေးမည်
+            if "youtube.com" in text or "youtu.be" in text:
+                if BOT_TOKEN and CHAT_ID:
+                    api("sendMessage", chat_id=CHAT_ID, text=f"📥 YouTube Link from App:\n{text}")
+                    
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        app.logger.exception("App webhook processing failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.post("/telegram-webhook")
 def telegram_webhook():
