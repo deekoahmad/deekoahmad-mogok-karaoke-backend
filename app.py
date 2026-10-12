@@ -1,14 +1,3 @@
-from flask import Flask, request, send_file
-import subprocess
-import os
-import uuid
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "YouTube to MP4 Server is Running!"
-
 @app.route('/download', methods=['GET'])
 def download_video():
     youtube_url = request.args.get('url')
@@ -20,18 +9,19 @@ def download_video():
     temp_filename = f"{uuid.uuid4()}.mp4"
     
     try:
-        # ffmpeg မလိုအပ်ဘဲ အကောင်းဆုံးရမည့် pre-merged format ဖြင့် temp ဖိုင်အဖြစ် ဒေါင်းမည်
         cmd = [
             'yt-dlp',
+            '--no-check-certificates',
             '-f', 'best',
             '-o', temp_filename,
             youtube_url
         ]
         
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
-        if not os.path.exists(temp_filename) or os.path.getsize(temp_filename) == 0:
-            return "Error: Failed to download video", 500
+        if result.returncode != 0 or not os.path.exists(temp_filename) or os.path.getsize(temp_filename) == 0:
+            error_msg = result.stderr if result.stderr else "Unknown yt-dlp error"
+            return f"Download Failed: {error_msg}", 500
 
         safe_filename = f"{file_name}.mp4"
 
@@ -47,7 +37,3 @@ def download_video():
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
         return str(e), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
