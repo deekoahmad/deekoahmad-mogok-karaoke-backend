@@ -2,12 +2,16 @@ from flask import Flask, request, send_file
 import subprocess
 import os
 import uuid
+import requests
 
 app = Flask(__name__)
 
+TELEGRAM_BOT_TOKEN = "8957688388:AAENJ6-hXVIoWI-7dfDdlZIHLwLy7RMFfKE"
+TELEGRAM_CHAT_ID = "@deeko_karaoki"
+
 @app.route('/')
 def home():
-    return "YouTube to MP4 Server is Running!"
+    return "Mogok Karaoke Backend is Running!"
 
 @app.route('/download', methods=['GET'])
 def download_video():
@@ -20,7 +24,7 @@ def download_video():
     temp_filename = f"{uuid.uuid4()}.mp4"
     
     try:
-        # YouTube ရဲ့ Bot ကန့်သတ်ချက်ကို ကျော်လွှားရန် Android Client ပုံစံဖြင့် ဟန်ဆောင်ခြင်း
+        # yt-dlp ဖြင့် Android Client ပုံစံဖြင့် ဗီဒီယိုကို ဆွဲထုတ်ခြင်း
         cmd = [
             'yt-dlp',
             '--no-check-certificates',
@@ -33,11 +37,20 @@ def download_video():
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
         if result.returncode != 0 or not os.path.exists(temp_filename) or os.path.getsize(temp_filename) == 0:
-            error_msg = result.stderr if result.stderr else "Unknown yt-dlp error"
-            return f"Download Failed: {error_msg}", 500
+            return f"Download Failed: {result.stderr}", 500
+
+        # Telegram Group သို့ ဗီဒီယိုဖိုင် ပို့ပေးခြင်း (Backup အနေဖြင့်)
+        try:
+            with open(temp_filename, 'rb') as video_file:
+                files = {'video': video_file}
+                data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': f"📥 Downloaded: {file_name}"}
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo", data=data, files=files, timeout=30)
+        except:
+            pass
 
         safe_filename = f"{file_name}.mp4"
 
+        # App ဘက်သို့ ဗီဒီယိုဖိုင်ကို တိုက်ရိုက်ပေးပို့ခြင်း
         response = send_file(
             temp_filename,
             as_attachment=True,
