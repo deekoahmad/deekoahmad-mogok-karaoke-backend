@@ -1,8 +1,9 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file
 import subprocess
 import os
 import uuid
 import requests
+import traceback
 
 app = Flask(__name__)
 
@@ -24,29 +25,28 @@ def download_video():
     temp_filename = f"{uuid.uuid4()}.mp4"
     
     try:
-        # yt-dlp ဖြင့် အကောင်းဆုံး အရည်အသွေးကို မြန်ဆန်စွာ ဆွဲထုတ်ခြင်း
         cmd = [
             'yt-dlp',
             '--no-check-certificates',
             '--extractor-args', 'youtube:player_client=android',
-            '-f', 'best[ext=mp4]/best',
+            '-f', 'best',
             '-o', temp_filename,
             youtube_url
         ]
         
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
         if result.returncode != 0 or not os.path.exists(temp_filename) or os.path.getsize(temp_filename) == 0:
             return f"Download Failed: {result.stderr}", 500
 
-        # Telegram Group သို့ ဗီဒီယိုဖိုင် ပို့ပေးခြင်း
+        # Telegram Group သို့ ပို့ခြင်း (Error တက်ရင်တောင် ဒေါင်းလုဒ်ဆက်သွားရန် try-except ခံထားသည်)
         try:
             with open(temp_filename, 'rb') as video_file:
                 files = {'video': video_file}
                 data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': f"📥 Downloaded: {file_name}"}
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo", data=data, files=files, timeout=60)
-        except:
-            pass
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo", data=data, files=files, timeout=30)
+        except Exception as tg_err:
+            print(f"Telegram Error: {str(tg_err)}")
 
         safe_filename = f"{file_name}.mp4"
 
@@ -58,17 +58,15 @@ def download_video():
         )
         return response
 
-    except subprocess.TimeoutExpired:
-        if os.path.exists(temp_filename):
-            try: os.remove(temp_filename)
-            except: pass
-        return "Error: Download timed out on server", 504
-
     except Exception as e:
+        error_details = traceback.format_exc()
+        print(f"Server Exception: {error_details}")
         if os.path.exists(temp_filename):
-            try: os.remove(temp_filename)
-            except: pass
-        return str(e), 500
+            try:
+                os.remove(temp_filename)
+            except:
+                pass
+        return f"Internal Error: {str(e)}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
