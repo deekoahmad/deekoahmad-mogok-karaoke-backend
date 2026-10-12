@@ -20,9 +20,11 @@ def download_video():
     temp_filename = f"{uuid.uuid4()}.mp4"
     
     try:
+        # YouTube ရဲ့ Bot ကန့်သတ်ချက်ကို ကျော်လွှားရန် Android Client ပုံစံဖြင့် ဟန်ဆောင်ခြင်း
         cmd = [
             'yt-dlp',
             '--no-check-certificates',
+            '--extractor-args', 'youtube:player_client=android',
             '-f', 'best',
             '-o', temp_filename,
             youtube_url
