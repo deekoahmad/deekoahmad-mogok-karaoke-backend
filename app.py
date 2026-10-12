@@ -10,74 +10,56 @@ CHAT_ID = (
     or os.environ.get("TELEGRAM_GROUP_ID")
 )
 
+TELEGRAM_API = (
+    f"https://api.telegram.org/bot{BOT_TOKEN}"
+    if BOT_TOKEN else None
+)
+
+def telegram_call(method, payload=None):
+    if not TELEGRAM_API:
+        raise RuntimeError("Telegram bot token is not configured")
+
+    response = requests.post(
+        f"{TELEGRAM_API}/{method}",
+        json=payload or {},
+        timeout=30
+    )
+    response.raise_for_status()
+    result = response.json()
+
+    if not result.get("ok"):
+        raise RuntimeError("Telegram API request failed")
+
+    return result["result"]
+
+
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "ok", "service": "Mogok Karaoke Bot"})
+    return jsonify({
+        "status": "ok",
+        "service": "Mogok Karaoke Bot"
+    })
+
 
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
+
 
 @app.route("/submit-link", methods=["POST"])
 def submit_link():
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
 
-    if not url.startswith(("https://www.youtube.com/",
-                           "https://youtube.com/",
-                           "https://youtu.be/")):
+    if not url.startswith((
+        "https://www.youtube.com/",
+        "https://youtube.com/",
+        "https://youtu.be/"
+    )):
         return jsonify({
             "ok": False,
-            "error": "Please provide a valid HTTPS YouTube link"
+            "error": "Invalid HTTPS YouTube URL"
         }), 400
-
-    if not BOT_TOKEN or not CHAT_ID:
-        return jsonify({
-            "ok": False,
-            "error": "Telegram environment variables are missing"
-        }), 500
-
-    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-    try:
-        response = requests.post(
-            api_url,
-            json={
-                "chat_id": CHAT_ID,
-                "text": f"🎵 New link from Mogok Karaoke App:\n{url}"
-            },
-            timeout=20
-        )
-
-        result = response.json()
-
-        if response.ok and result.get("ok"):
-            return jsonify({
-                "ok": True,
-                "message": "Link sent to Telegram"
-            })
-
-        print("Telegram API error:", result)
-        return jsonify({
-            "ok": False,
-            "error": "Telegram rejected the message"
-        }), 502
-
-    except requests.RequestException as exc:
-        print("Telegram connection error:", str(exc))
-        return jsonify({
-            "ok": False,
-            "error": "Could not connect to Telegram"
-        }), 502
-
-
-@app.route("/telegram-test", methods=["POST"])
-def telegram_test():
-    key = os.environ.get("TELEGRAM_TEST_KEY")
-    supplied_key = request.headers.get("X-Test-Key")
-
-    if not key or supplied_key != key:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     if not BOT_TOKEN or not CHAT_ID:
         return jsonify({
@@ -86,29 +68,50 @@ def telegram_test():
         }), 500
 
     try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": CHAT_ID,
-                "text": "✅ Mogok Karaoke Telegram connection test"
-            },
-            timeout=20
-        )
-        result = response.json()
-
-        if response.ok and result.get("ok"):
-            return jsonify({"ok": True, "message": "Telegram message sent"})
-
-        print("Telegram API error:", result)
+        telegram_call("sendMessage", {
+            "chat_id": CHAT_ID,
+            "text": f"🎵 Link from Mogok Karaoke App:\n{url}"
+        })
+        return jsonify({"ok": True})
+    except Exception:
+        app.logger.exception("Telegram send failed")
         return jsonify({
             "ok": False,
-            "error": result.get("description", "Telegram API error")
+            "error": "Telegram send failed"
         }), 502
 
-    except requests.RequestException as exc:
-        print("Telegram connection error:", str(exc))
-        return jsonify({"ok": False, "error": "Connection failed"}), 502
-        
+
+@app.route("/telegram-webhook", methods=["POST"])
+def telegram_webhook():
+    data = request.get_json(silent=True) or {}
+    message = data.get("message") or data.get("channel_post")
+
+    if not message:
+        return jsonify({"ok": True})
+
+    chat = message.get("chat", {})
+    if CHAT_ID and str(chat.get("id")) != str(CHAT_ID):
+        return jsonify({"ok": True})
+
+    video = message.get("video") or message.get("document")
+
+    if video:
+        return jsonify({
+            "ok": True,
+            "video": {
+                "file_id": video.get("file_id"),
+                "file_name": (
+                    video.get("file_name")
+                    or "telegram_video"
+                ),
+                "mime_type": video.get("mime_type"),
+                "file_size": video.get("file_size")
+            }
+        })
+
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
