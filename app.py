@@ -1,183 +1,48 @@
+from flask import Flask, request, Response
+import subprocess
 import os
-import sqlite3
-import requests
-from flask import Flask, request, jsonify, Response
 
 app = Flask(__name__)
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = (
-    os.environ.get("TELEGRAM_TARGET_CHAT_ID")
-    or os.environ.get("TELEGRAM_GROUP_ID")
-)
-WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
-DB_PATH = os.environ.get("DB_PATH", "/tmp/mogok_videos.db")
+@app.route('/')
+def home():
+    return "YouTube to MP4 Streaming Server is Running!"
 
-def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS videos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id TEXT UNIQUE NOT NULL,
-            name TEXT NOT NULL,
-            size INTEGER DEFAULT 0
-        )
-    """)
-    return conn
+@app.route('/download', methods=['GET'])
+def download_video():
+    youtube_url = request.args.get('url')
+    file_name = request.args.get('name', 'karaoke_video')
 
-def api(method, **kwargs):
-    if not BOT_TOKEN:
-        raise RuntimeError("Telegram token missing")
-    r = requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",
-        json=kwargs,
-        timeout=30
-    )
-    r.raise_for_status()
-    result = r.json()
-    if not result.get("ok"):
-        raise RuntimeError("Telegram API request failed")
-    return result["result"]
+    if not youtube_url:
+        return "Error: YouTube URL is missing", 400
 
-@app.get("/")
-@app.get("/health")
-def health():
-    return jsonify({"status": "ok", "message": "Mogok Karaoke Backend is running!"})
+    # ဆာဗာမှာ ဖိုင်အမြဲမသိမ်းဘဲ yt-dlp ဖြင့် တိုက်ရိုက် Stream လုပ်ပေးမည့် Command
+    def generate():
+        # yt-dlp ကိုသုံး၍ best video+audio ကို mp4 အဖြစ် stdout သို့ တိုက်ရိုက်ထုတ်ပေးခြင်း
+        cmd = [
+            'yt-dlp',
+            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=mp4]/best[ext=mp4]/best',
+            '-o', '-',
+            youtube_url
+        ]
+        
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        while True:
+            data = process.stdout.read(4096)
+            if not data:
+                break
+            yield data
 
-# Android App မှ YouTube လင့်ခ်များကို လက်ခံရန် Endpoint 
-@app.post("/webhook")
-def app_webhook():
-    try:
-        data = request.get_json(silent=True) or {}
-        # Android App မှလာသော ပုံစံ သို့မဟုတ် Telegram မှလာသော ပုံစံ နှစ်မျိုးစလုံးကို လက်ခံနိုင်ရန်
-        message = data.get("message") or data.get("edited_message")
-        if message:
-            text = message.get("text", "") or message.get("caption", "")
-            
-            # YouTube လင့်ခ်ပါလာပါက Telegram Group ထဲသို့ Bot မှတဆင့် ပို့ပေးမည်
-            if "youtube.com" in text or "youtu.be" in text:
-                if BOT_TOKEN and CHAT_ID:
-                    api("sendMessage", chat_id=CHAT_ID, text=f"📥 YouTube Link from App:\n{text}")
-                    
-        return jsonify({"ok": True}), 200
-    except Exception as e:
-        app.logger.exception("App webhook processing failed")
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-@app.post("/telegram-webhook")
-def telegram_webhook():
-    if WEBHOOK_SECRET:
-        supplied = request.headers.get(
-            "X-Telegram-Bot-Api-Secret-Token", ""
-        )
-        if supplied != WEBHOOK_SECRET:
-            return jsonify({"ok": False}), 403
-
-    data = request.get_json(silent=True) or {}
-    msg = data.get("message") or data.get("channel_post")
-
-    if not msg:
-        return jsonify({"ok": True})
-
-    chat = msg.get("chat", {})
-    if CHAT_ID and str(chat.get("id")) != str(CHAT_ID):
-        return jsonify({"ok": True})
-
-    media = msg.get("video") or msg.get("document")
-    if not media:
-        return jsonify({"ok": True})
-
-    mime = media.get("mime_type", "")
-    if "video" not in media and not mime.startswith("video/"):
-        return jsonify({"ok": True})
-
-    file_id = media.get("file_id")
-    if not file_id:
-        return jsonify({"ok": True})
-
-    name = media.get("file_name") or "telegram_video.mp4"
-    size = media.get("file_size") or 0
-
-    conn = db()
-    conn.execute(
-        """INSERT INTO videos(file_id,name,size)
-           VALUES(?,?,?)
-           ON CONFLICT(file_id) DO UPDATE SET
-           name=excluded.name,size=excluded.size""",
-        (file_id, name, size)
-    )
-    conn.commit()
-    conn.close()
-
-    return jsonify({"ok": True})
-
-@app.get("/videos")
-def videos():
-    conn = db()
-    rows = conn.execute(
-        "SELECT id,name,size FROM videos ORDER BY id DESC"
-    ).fetchall()
-    conn.close()
-    return jsonify({
-        "videos": [dict(row) for row in rows]
-    })
-
-@app.get("/download/<int:video_id>")
-def download_video(video_id):
-    conn = db()
-    row = conn.execute(
-        "SELECT file_id,name FROM videos WHERE id=?",
-        (video_id,)
-    ).fetchone()
-    conn.close()
-
-    if not row:
-        return jsonify({"error": "Video not found"}), 404
-
-    try:
-        info = api("getFile", file_id=row["file_id"])
-        path = info.get("file_path")
-        if not path:
-            return jsonify({"error": "Telegram file unavailable"}), 502
-
-        url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{path}"
-        upstream = requests.get(url, stream=True, timeout=(15, 60))
-        if upstream.status_code != 200:
-            upstream.close()
-            return jsonify({"error": "Telegram download failed"}), 502
-
-        filename = row["name"].replace("\r", "").replace("\n", "")
-        filename = filename.replace('"', "")
-        headers = {
-            "Content-Disposition":
-                f'attachment; filename="{filename}"',
-            "Cache-Control": "no-store"
+    # User ရဲ့ ဖုန်းထဲသို့ ဖိုင်နာမည်မှန်ကန်စွာဖြင့် .mp4 အဖြစ် တိုက်ရိုက်ပေးပို့ခြင်း
+    safe_filename = f"{file_name}.mp4".encode('utf-8').decode('latin-1')
+    return Response(
+        generate(),
+        mimetype='video/mp4',
+        headers={
+            'Content-Disposition': f'attachment; filename="{safe_filename}"'
         }
-        if upstream.headers.get("Content-Length"):
-            headers["Content-Length"] = upstream.headers["Content-Length"]
-
-        def stream():
-            try:
-                for chunk in upstream.iter_content(64 * 1024):
-                    if chunk:
-                        yield chunk
-            finally:
-                upstream.close()
-
-        return Response(
-            stream(),
-            headers=headers,
-            content_type=upstream.headers.get(
-                "Content-Type", "application/octet-stream"
-            )
-        )
-    except Exception:
-        app.logger.exception("Video download failed")
-        return jsonify({"error": "Could not retrieve Telegram video"}), 502
-
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000))
     )
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
