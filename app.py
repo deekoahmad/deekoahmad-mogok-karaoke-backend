@@ -21,15 +21,21 @@ def download_video():
     if not youtube_url:
         return "Error: YouTube URL is missing", 400
 
+    # yt-dlp ကို လိုအပ်ပါက အမြշတမ်း Update တင်မည်
+    try:
+        subprocess.run(['pip', 'install', '--upgrade', 'yt-dlp'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except:
+        pass
+
     temp_filename = f"{uuid.uuid4()}.mp4"
     
     try:
-        # yt-dlp ဖြင့် Android Client ပုံစံဖြင့် ဗီဒီယိုကို ဆွဲထုတ်ခြင်း
+        # yt-dlp ဖြင့် ဗီဒီယိုဆွဲထုတ်ခြင်း (Android Client နှင့် Browser emulation သုံးမည်)
         cmd = [
             'yt-dlp',
             '--no-check-certificates',
-            '--extractor-args', 'youtube:player_client=android',
-            '-f', 'best',
+            '--extractor-args', 'youtube:player_client=android,web',
+            '-f', 'best[ext=mp4]/best',
             '-o', temp_filename,
             youtube_url
         ]
@@ -50,7 +56,6 @@ def download_video():
 
         safe_filename = f"{file_name}.mp4"
 
-        # App ဘက်သို့ ဗီဒီယိုဖိုင်ကို တိုက်ရိုက်ပေးပို့ခြင်း
         response = send_file(
             temp_filename,
             as_attachment=True,
