@@ -17,14 +17,13 @@ def download_video():
     if not youtube_url:
         return "Error: YouTube URL is missing", 400
 
-    # Unique နာမည်တစ်ခုဖြင့် temp ဖိုင်အဖြစ် ဆာဗာပေါ်တွင် အရင်ဒေါင်းလုပ်ဆွဲမည်
     temp_filename = f"{uuid.uuid4()}.mp4"
     
     try:
-        # yt-dlp ဖြင့် ဗီဒီယိုနှင့်အသံအပြည့်အစုံကို mp4 အဖြစ် ဆာဗာသို့ အရင်ဒေါင်းမည်
+        # ffmpeg မလိုအပ်ဘဲ အကောင်းဆုံးရမည့် pre-merged format ဖြင့် temp ဖိုင်အဖြစ် ဒေါင်းမည်
         cmd = [
             'yt-dlp',
-            '-f', 'best[ext=mp4]/best',
+            '-f', 'best',
             '-o', temp_filename,
             youtube_url
         ]
@@ -32,17 +31,17 @@ def download_video():
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         
         if not os.path.exists(temp_filename) or os.path.getsize(temp_filename) == 0:
-            return "Error: Failed to download video from YouTube", 500
+            return "Error: Failed to download video", 500
 
         safe_filename = f"{file_name}.mp4"
 
-        # ဖိုင်အပြည့်အစုံကို App ထဲသို့ ပို့ဆောင်ပြီး ဆာဗာပေါ်မှ ပြန်ဖျက်မည်
-        return send_file(
+        response = send_file(
             temp_filename,
             as_attachment=True,
             download_name=safe_filename,
             mimetype='video/mp4'
         )
+        return response
 
     except Exception as e:
         if os.path.exists(temp_filename):
