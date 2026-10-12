@@ -1,12 +1,13 @@
-from flask import Flask, request, Response
+from flask import Flask, request, send_file
 import subprocess
 import os
+import uuid
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "YouTube to MP4 Streaming Server is Running!"
+    return "YouTube to MP4 Server is Running!"
 
 @app.route('/download', methods=['GET'])
 def download_video():
@@ -16,30 +17,37 @@ def download_video():
     if not youtube_url:
         return "Error: YouTube URL is missing", 400
 
-    def generate():
-        # yt-dlp ဖြင့် ဗီဒီယိုအပြည့်အစုံကို အကောင်းဆုံး format ဖြင့် stdout သို့ တိုက်ရိုက်ထုတ်ပေးခြင်း
+    # Unique နာမည်တစ်ခုဖြင့် temp ဖိုင်အဖြစ် ဆာဗာပေါ်တွင် အရင်ဒေါင်းလုပ်ဆွဲမည်
+    temp_filename = f"{uuid.uuid4()}.mp4"
+    
+    try:
+        # yt-dlp ဖြင့် ဗီဒီယိုနှင့်အသံအပြည့်အစုံကို mp4 အဖြစ် ဆာဗာသို့ အရင်ဒေါင်းမည်
         cmd = [
             'yt-dlp',
-            '-f', 'best',
-            '-o', '-',
+            '-f', 'best[ext=mp4]/best',
+            '-o', temp_filename,
             youtube_url
         ]
         
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
-        while True:
-            data = process.stdout.read(65536)
-            if not data:
-                break
-            yield data
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        if not os.path.exists(temp_filename) or os.path.getsize(temp_filename) == 0:
+            return "Error: Failed to download video from YouTube", 500
 
-    safe_filename = f"{file_name}.mp4".encode('utf-8').decode('latin-1')
-    return Response(
-        generate(),
-        mimetype='video/mp4',
-        headers={
-            'Content-Disposition': f'attachment; filename="{safe_filename}"'
-        }
-    )
+        safe_filename = f"{file_name}.mp4"
+
+        # ဖိုင်အပြည့်အစုံကို App ထဲသို့ ပို့ဆောင်ပြီး ဆာဗာပေါ်မှ ပြန်ဖျက်မည်
+        return send_file(
+            temp_filename,
+            as_attachment=True,
+            download_name=safe_filename,
+            mimetype='video/mp4'
+        )
+
+    except Exception as e:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+        return str(e), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
