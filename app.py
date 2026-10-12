@@ -1,3 +1,14 @@
+from flask import Flask, request, send_file
+import subprocess
+import os
+import uuid
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "YouTube to MP4 Server is Running!"
+
 @app.route('/download', methods=['GET'])
 def download_video():
     youtube_url = request.args.get('url')
@@ -35,5 +46,12 @@ def download_video():
 
     except Exception as e:
         if os.path.exists(temp_filename):
-            os.remove(temp_filename)
+            try:
+                os.remove(temp_filename)
+            except:
+                pass
         return str(e), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
